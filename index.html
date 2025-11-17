@@ -1,1 +1,1090 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GCSE Reflections — Student-Placed Lines & Tools (INK LAYER — PEN THINNER)</title>
+<style>
+  /* ===== Black & White, single screen, clean ===== */
+  :root{
+    --bg:#ffffff;
+    --ink:#000000;
+    --grid:#dddddd;
+    --axis:#000000;
+    --ghost:#999999;
+    --error:#e83333;
+  }
+  html, body { height:100%; margin:0; background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Noto Sans",sans-serif; }
+  #app { height:100vh; display:grid; grid-template-rows:auto 1fr auto; gap:6px; padding:8px; box-sizing:border-box; overflow:hidden; }
 
+  /* Header (prompt + palette) */
+  .bar{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    border:1px solid #000; padding:6px 8px; border-radius:8px; background:#fff; min-height:48px;
+  }
+  .prompt{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-weight:800 }
+  .prompt .lineText{ font-weight:900 }
+  .label{ font-weight:700 }
+  .token{
+    display:inline-grid; place-items:center; user-select:none; cursor:grab;
+    width:28px; height:22px; border:1px solid #000; border-radius:6px; background:#fff;
+  }
+  .token.dragging{ cursor:grabbing }
+  .tokenGhost{
+    position:fixed; width:28px; height:22px; border-radius:6px; border:1px solid #000; background:#fff; pointer-events:none; z-index:1000;
+    transform:translate(-50%, -50%); display:grid; place-items:center;
+  }
+  .token .hDash, .tokenGhost .hDash{ width:18px; height:0; border-top:2px dashed #000; }
+  .token .vDash, .tokenGhost .vDash{ width:0; height:14px; border-left:2px dashed #000; }
+  .token .dot, .tokenGhost .dot{ width:8px; height:8px; border-radius:50%; background:#000; }
+
+  .hud{ display:flex; align-items:center; gap:12px; flex-wrap:wrap }
+  .hud .pill{ border:1px solid #000; border-radius:999px; padding:4px 10px; font-weight:800 }
+  .controls{ display:flex; gap:8px; align-items:center; flex-wrap:wrap }
+  button{
+    appearance:none; background:#fff; color:#000; border:1px solid #000; border-radius:6px; padding:6px 10px; font-weight:800; cursor:pointer;
+  }
+  button:disabled{ opacity:.5; cursor:not-allowed }
+  button:focus-visible, input:focus-visible{ outline:2px solid #000; outline-offset:1px }
+  .toggle.on{ background:#000; color:#fff }
+
+  /* Canvas area */
+  .stageWrap{
+    position:relative; display:grid; place-items:center; border:1px solid #000; border-radius:8px; background:#fff;
+    min-height:0;
+  }
+
+  /* Stack ensures all canvases are EXACTLY the same size & position */
+  .stack{
+    position:relative;
+    /* width/height are set in JS to match the grid square exactly */
+  }
+  .stack canvas{
+    position:absolute; left:0; top:0; width:100%; height:100%;
+    display:block; touch-action:none;
+  }
+  #gridCanvas{ z-index:1; }
+  /* Ink is the TOP-MOST drawing layer — writes above EVERYTHING in the grid area */
+  #inkCanvas{ z-index: 100; pointer-events:none; }
+  /* Confetti above ink only when celebrating; it doesn't block the pen because we toggle pointer-events on ink only */
+  #confettiCanvas{ z-index: 120; pointer-events:none; display:none; }
+
+  /* Big message overlay */
+  #bigMsg{
+    position:absolute; inset:0; display:none; align-items:center; justify-content:center; pointer-events:none;
+    font-weight:900; font-size:min(12vw, 64px); letter-spacing:1px; color:#000; z-index:150;
+  }
+
+  /* Bottom answer area */
+  .answerBar{
+    border:1px solid #000; border-radius:8px; padding:8px; display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; background:#fff;
+    min-height:60px;
+  }
+  .answerBar .hint{ font-size:12px; margin-bottom:6px }
+  .answerGrid{ display:grid; gap:6px; }
+  .row{ display:flex; align-items:center; gap:6px; border:1px solid #000; border-radius:6px; padding:6px }
+  .row label{ min-width:1.5em; text-align:right; font-weight:800 }
+  .row input{
+    width:100%; padding:6px 8px; border:1px solid #000; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  .actions{ display:flex; gap:6px; flex-wrap:wrap; align-items:center }
+  .msg{ font-weight:800; padding:6px 8px; border-radius:6px; border:1px solid #000; display:none; }
+
+  /* Error highlight + screen shake */
+  .answerBar.error{ border-color:var(--error); box-shadow:0 0 0 3px var(--error) inset; }
+  @keyframes shake {
+    0%{ transform:translateX(0); }
+    20%{ transform:translateX(-6px); }
+    40%{ transform:translateX(6px); }
+    60%{ transform:translateX(-4px); }
+    80%{ transform:translateX(4px); }
+    100%{ transform:translateX(0); }
+  }
+  .shake{ animation:shake .45s ease; }
+
+  /* Menu overlay (game modes) */
+  .overlay{
+    position:fixed; inset:0; background:#fff; display:flex; align-items:center; justify-content:center; padding:16px; z-index:9999;
+    border:6px solid #000;
+  }
+  .panel{
+    width:min(900px, 96vw); border:2px solid #000; border-radius:10px; padding:14px; display:grid; gap:12px; background:#fff;
+  }
+  .panel h1{ margin:0; font-size:20px }
+  .opts{ display:grid; grid-template-columns:1fr 1fr; gap:12px }
+  .card{ border:1px solid #000; border-radius:10px; padding:12px; display:grid; gap:10px }
+  .radio{ display:flex; gap:8px; align-items:center; font-weight:800 }
+  .field{ display:flex; gap:8px; align-items:center; }
+  .field input[type="number"]{ width:120px; padding:6px 8px; border:1px solid #000; border-radius:6px; }
+  .pills{ display:flex; gap:6px; flex-wrap:wrap }
+  .pillBtn{ padding:6px 10px; border:1px solid #000; border-radius:999px; background:#fff; cursor:pointer; font-weight:800 }
+  .pillBtn.sel{ background:#000; color:#fff }
+  .pills.disabled .pillBtn{ opacity:0.35; pointer-events:none; }
+  .panel .footer{ display:flex; justify-content:flex-end; gap:8px }
+  .sm{ font-size:12px; color:#000 }
+
+  /* Responsive: keep single screen */
+  @media (max-width: 900px){
+    .answerBar{ grid-template-columns:1fr; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- Top bar -->
+  <div class="bar">
+    <div class="prompt">
+      <span>Reflect the shape in</span>
+      <span id="lineText" class="lineText"></span>
+      <span class="label">Palette:</span>
+      <!-- Horizontal dashed line token -->
+      <span id="hToken" class="token" title="Drag to place a horizontal dashed line">
+        <span class="hDash"></span>
+      </span>
+      <!-- Vertical dashed line token -->
+      <span id="vToken" class="token" title="Drag to place a vertical dashed line">
+        <span class="vDash"></span>
+      </span>
+      <!-- Point token (to mark vertices) -->
+      <span id="ptToken" class="token" title="Drag to drop a point (drag to move; double-click to remove)">
+        <span class="dot"></span>
+      </span>
+    </div>
+
+    <div class="hud">
+      <span class="pill" id="hudScore">Score: 0</span>
+      <span class="pill" id="hudGoal" style="display:none;">Goal: 10</span>
+      <span class="pill" id="hudTime" style="display:none;">Time: 05:00</span>
+    </div>
+
+    <div class="controls">
+      <button id="penBtn" class="toggle" title="Toggle pen (black)">Pen: Off</button>
+      <button id="eraserBtn" class="toggle" title="Toggle eraser (pen only)">Eraser: Off</button>
+      <button id="clearPenBtn" title="Clear pen drawings">Clear Pen</button>
+      <button id="resetToolsBtn" title="Remove dashed lines & user points">Reset Tools</button>
+      <button id="menuBtn" title="Back to menu">Menu</button>
+    </div>
+  </div>
+
+  <!-- Canvas stage -->
+  <div class="stageWrap" id="stage">
+    <div id="stack" class="stack">
+      <canvas id="gridCanvas"></canvas>
+      <!-- Dedicated ink layer always on top of the grid area -->
+      <canvas id="inkCanvas"></canvas>
+      <canvas id="confettiCanvas"></canvas>
+    </div>
+    <div id="bigMsg">CORRECT!</div>
+  </div>
+
+  <!-- Bottom answer panel -->
+  <div class="answerBar" id="answerBar">
+    <div>
+      <div class="hint">Enter the coordinates of the reflected shape like <span style="font-family:ui-monospace,monospace;">(x, y)</span> — any vertex order is fine.</div>
+      <div id="inputs" class="answerGrid"></div>
+    </div>
+    <div class="actions">
+      <button id="checkBtn">Check</button>
+      <button id="skipBtn" title="Skip this question">Skip</button>
+      <button id="nextBtn" style="display:none;">Next question</button>
+      <span id="feedback" class="msg"></span>
+    </div>
+  </div>
+</div>
+
+<!-- Overlay menu -->
+<div id="menu" class="overlay" role="dialog" aria-modal="true">
+  <div class="panel">
+    <h1>Choose a game mode</h1>
+    <div class="opts">
+      <div class="card">
+        <label class="radio">
+          <input type="radio" name="mode" value="target" checked />
+          <span>Target score</span>
+        </label>
+        <div class="field">
+          <label for="targetScore"><b>Score to reach:</b></label>
+          <input id="targetScore" type="number" min="5" step="5" value="10" />
+        </div>
+        <div class="sm">Earn +1 point for each correct question.</div>
+      </div>
+      <div class="card">
+        <label class="radio">
+          <input type="radio" name="mode" value="timed" />
+          <span>Timed game</span>
+        </label>
+        <div class="pills disabled" id="timeChoices" aria-disabled="true">
+          <button class="pillBtn" data-min="5">5 min</button>
+          <button class="pillBtn" data-min="10">10 min</button>
+          <button class="pillBtn" data-min="20">20 min</button>
+          <button class="pillBtn" data-min="30">30 min</button>
+          <button class="pillBtn" data-min="0">No limit</button>
+        </div>
+        <div class="sm">Answer as many as you can before time runs out (or choose no limit).</div>
+      </div>
+    </div>
+    <div class="footer">
+      <button id="startBtn">Start game</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  // ===== Constants / State =====
+  const GRID_MIN = -10, GRID_MAX = 10;
+
+  const state = {
+    // gameplay
+    mode: 'target',
+    targetScore: 10,
+    timeLimitSec: 0,
+    timeLeftSec: 0,
+    timerId: null,
+    score: 0,
+    answeredCorrectly: false,
+
+    // geometry
+    original: [],                     // polygon vertices (ints)
+    requiredLine: {type:'vertical', value:0}, // line used for marking (NOT drawn on grid)
+
+    // tools (not graded)
+    toolH: { placed:false, y:0, last:false },
+    toolV: { placed:false, x:0, last:false },
+    userPoints: [],                   // array of {x,y}
+
+    // ink layer (pen/eraser)
+    penMode: 'off',                   // 'off' | 'pen' | 'eraser'
+    penDrawing: false,
+    penLast: {x:0, y:0},              // last point in stack-local CSS px
+
+    // dragging tokens/lines/points
+    dragging: false,
+    dragType: null,                   // 'hline' | 'vline' | 'point'
+    dragPointIdx: -1,
+
+    // line type scheduler: equal mix horizontal/vertical
+    lineSeq: [],
+    lineIdx: 0,
+  };
+
+  // ===== Elements =====
+  const stage = document.getElementById('stage');
+  const stack = document.getElementById('stack');
+  const gridCanvas = document.getElementById('gridCanvas');
+  const inkCanvas = document.getElementById('inkCanvas');
+  const confettiCanvas = document.getElementById('confettiCanvas');
+  const bigMsg = document.getElementById('bigMsg');
+
+  const inputsDiv = document.getElementById('inputs');
+  const answerBar = document.getElementById('answerBar');
+  const feedback = document.getElementById('feedback');
+
+  const hudScore = document.getElementById('hudScore');
+  const hudGoal  = document.getElementById('hudGoal');
+  const hudTime  = document.getElementById('hudTime');
+
+  const hToken = document.getElementById('hToken');
+  const vToken = document.getElementById('vToken');
+  const ptToken= document.getElementById('ptToken');
+
+  const checkBtn = document.getElementById('checkBtn');
+  const skipBtn  = document.getElementById('skipBtn');
+  const nextBtn  = document.getElementById('nextBtn');
+
+  const penBtn = document.getElementById('penBtn');
+  const eraserBtn = document.getElementById('eraserBtn');
+  const clearPenBtn = document.getElementById('clearPenBtn');
+  const resetToolsBtn = document.getElementById('resetToolsBtn');
+
+  const menu = document.getElementById('menu');
+  const menuBtn = document.getElementById('menuBtn');
+  const startBtn = document.getElementById('startBtn');
+  const timeChoices = document.getElementById('timeChoices');
+  const targetScoreInput = document.getElementById('targetScore');
+  const modeRadios = [...document.querySelectorAll('input[name="mode"]')];
+
+  const lineText = document.getElementById('lineText');
+
+  // ===== Layout / sizing =====
+  const PAD = 36; // space around grid for labels
+  let scale = 1;
+  let sizePx = 0;
+
+  // set canvas size and DPR transform so drawing uses CSS pixel coordinates consistently
+  function sizeCanvasTo(el, cssW, cssH){
+    const dpr = window.devicePixelRatio || 1;
+    el.width  = Math.floor(cssW * dpr);
+    el.height = Math.floor(cssH * dpr);
+    const ctx = el.getContext('2d');
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    return ctx;
+  }
+
+  function resizeCanvasToFit(){
+    const wrap = stage; // center area
+    const availW = wrap.clientWidth - 2;
+    const availH = wrap.clientHeight - 2;
+    sizePx = Math.max(260, Math.min(availW, availH)); // keep square
+    stack.style.width = sizePx + 'px';
+    stack.style.height = sizePx + 'px';
+
+    // (Re)size and set transforms for all canvases in the stack
+    sizeCanvasTo(gridCanvas, sizePx, sizePx);
+    sizeCanvasTo(inkCanvas,  sizePx, sizePx);
+    sizeCanvasTo(confettiCanvas, sizePx, sizePx);
+
+    scale = (sizePx - 2*PAD) / (GRID_MAX - GRID_MIN);
+    draw(); // redraw grid + shape (ink layer is independent)
+  }
+
+  // grid <-> pixel mapping within the STACK (not the full stage)
+  function gxToPx(x){ return PAD + (x - GRID_MIN) * scale; }
+  function gyToPx(y){ return PAD + (GRID_MAX - y) * scale; }
+  function pxToGx(px){ return GRID_MIN + (px - PAD)/scale; }
+  function pxToGy(py){ return GRID_MAX - (py - PAD)/scale; }
+
+  // get pointer coords in stack-local CSS pixels
+  function localXY(e){
+    const rect = stack.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top};
+  }
+
+  // ===== Drawing =====
+  function drawGrid(ctx){
+    const W = sizePx, H = sizePx;
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle = '#fff'; ctx.fillRect(0,0,W,H);
+
+    // grid lines
+    ctx.lineWidth = 1; ctx.strokeStyle = '#ddd';
+    ctx.beginPath();
+    for(let i=GRID_MIN;i<=GRID_MAX;i++){
+      const vx = gxToPx(i);
+      ctx.moveTo(vx, gyToPx(GRID_MIN));
+      ctx.lineTo(vx, gyToPx(GRID_MAX));
+      const hy = gyToPx(i);
+      ctx.moveTo(gxToPx(GRID_MIN), hy);
+      ctx.lineTo(gxToPx(GRID_MAX), hy);
+    }
+    ctx.stroke();
+
+    // axes
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(gxToPx(GRID_MIN), gyToPx(0));
+    ctx.lineTo(gxToPx(GRID_MAX), gyToPx(0));
+    ctx.moveTo(gxToPx(0), gyToPx(GRID_MIN));
+    ctx.lineTo(gxToPx(0), gyToPx(GRID_MAX));
+    ctx.stroke();
+
+    // labels (single "0" near origin; others exclude 0)
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 14px system-ui, sans-serif';
+
+    // x labels except 0
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    for(let i=GRID_MIN;i<=GRID_MAX;i++){
+      if(i===0) continue;
+      ctx.fillText(String(i), gxToPx(i), gyToPx(0) + 4);
+    }
+    // y labels except 0
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    for(let i=GRID_MIN;i<=GRID_MAX;i++){
+      if(i===0) continue;
+      ctx.fillText(String(i), gxToPx(0) - 6, gyToPx(i));
+    }
+    // single zero close to origin
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText('0', gxToPx(0)+4, gyToPx(0)+2);
+  }
+
+  function drawPolygon(ctx, pts, {shade=false, dashed=false}={}){
+    if(!pts.length) return;
+    ctx.save();
+    if(dashed) ctx.setLineDash([6,6]);
+    ctx.beginPath();
+    ctx.moveTo(gxToPx(pts[0].x), gyToPx(pts[0].y));
+    for(let i=1;i<pts.length;i++){
+      ctx.lineTo(gxToPx(pts[i].x), gyToPx(pts[i].y));
+    }
+    ctx.closePath();
+    ctx.lineWidth = 2; ctx.strokeStyle = '#000'; ctx.stroke();
+    if(shade){ ctx.fillStyle = 'rgba(0,0,0,0.10)'; ctx.fill(); }
+    ctx.restore();
+  }
+
+  function drawToolLines(ctx){
+    ctx.save();
+    ctx.setLineDash([8,6]); ctx.lineWidth = 2; ctx.strokeStyle = '#000';
+    if(state.toolH.placed){
+      ctx.beginPath();
+      ctx.moveTo(gxToPx(GRID_MIN), gyToPx(state.toolH.y));
+      ctx.lineTo(gxToPx(GRID_MAX), gyToPx(state.toolH.y));
+      ctx.stroke();
+    }
+    if(state.toolV.placed){
+      ctx.beginPath();
+      ctx.moveTo(gxToPx(state.toolV.x), gyToPx(GRID_MIN));
+      ctx.lineTo(gxToPx(state.toolV.x), gyToPx(GRID_MAX));
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawUserPoints(ctx){
+    if(!state.userPoints.length) return;
+    ctx.save(); ctx.fillStyle='#000';
+    const r = Math.max(3, scale*0.12);
+    for(const p of state.userPoints){
+      ctx.beginPath(); ctx.arc(gxToPx(p.x), gyToPx(p.y), r, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawTypedDots(ctx){
+    const pts = peekInputs();
+    if(!pts.length) return;
+    ctx.save(); ctx.fillStyle='#000';
+    const r = Math.max(3, scale*0.12);
+    for(const p of pts){ ctx.beginPath(); ctx.arc(gxToPx(p.x), gyToPx(p.y), r, 0, Math.PI*2); ctx.fill(); }
+    ctx.restore();
+  }
+
+  function drawExpectedDots(ctx){
+    if(!state.answeredCorrectly) return;
+    const pts = expectedPts();
+    ctx.save(); ctx.fillStyle='#000';
+    const r = Math.max(4, scale*0.16);
+    for(const p of pts){ ctx.beginPath(); ctx.arc(gxToPx(p.x), gyToPx(p.y), r, 0, Math.PI*2); ctx.fill(); }
+    ctx.restore();
+  }
+
+  function draw(){
+    const ctx = gridCanvas.getContext('2d');
+    drawGrid(ctx);
+    drawPolygon(ctx, state.original, {shade:true, dashed:false});  // original only (no auto-reflection preview)
+    drawToolLines(ctx);
+    drawUserPoints(ctx);
+    drawTypedDots(ctx);
+    drawExpectedDots(ctx);
+  }
+
+  // ===== Geometry =====
+  function reflectPoint(p, line){
+    if(line.type==='vertical'){ return {x: 2*line.value - p.x, y: p.y}; }
+    else { return {x: p.x, y: 2*line.value - p.y}; }
+  }
+  function reflectPolygon(pts, line){ return pts.map(p=>reflectPoint(p,line)); }
+  function bbox(pts){
+    let minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
+    for(const p of pts){ if(p.x<minX)minX=p.x; if(p.x>maxX)maxX=p.x; if(p.y<minY)minY=p.y; if(p.y>maxY)maxY=p.y; }
+    return {minX,maxX,minY,maxY};
+  }
+  function centroid(pts){
+    return { x: pts.reduce((s,p)=>s+p.x,0)/pts.length, y: pts.reduce((s,p)=>s+p.y,0)/pts.length };
+  }
+
+  // ===== Shape generation =====
+  function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
+  function choice(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+  function shuffle(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } return arr; }
+
+  function genRectangle(isSquare=false){
+    const w = isSquare ? choice([2,3,4,5]) : choice([2,3,4,5,6]);
+    const h = isSquare ? w : choice([2,3,4,5,6].filter(x=>x!==w || w<=5));
+    const minX = GRID_MIN+1, maxX = GRID_MAX-1, minY = GRID_MIN+1, maxY = GRID_MAX-1;
+    const x0 = randInt(minX, maxX - w);
+    const y0 = randInt(minY, maxY - h);
+    const A = {x:x0,   y:y0};
+    const B = {x:x0+w, y:y0};
+    const C = {x:x0+w, y:y0+h};
+    const D = {x:x0,   y:y0+h};
+    return [A,B,C,D];
+  }
+  function genRightTriangle(){
+    const w = choice([2,3,4,5]);
+    const h = choice([2,3,4,5]);
+    const ax = randInt(GRID_MIN, GRID_MAX - w);
+    const ay = randInt(GRID_MIN, GRID_MAX - h);
+    const A = {x:ax, y:ay};
+    const B = {x:ax+w, y:ay};
+    const C = {x:ax, y:ay+h};
+    return [A,B,C];
+  }
+  function genIsoscelesTriangle(){
+    const k = choice([1,2,3,4,5]);     // half base length
+    const h = choice([2,3,4,5,6]);     // height
+    const up = Math.random() < 0.5 ? 1 : -1;
+    const cx = randInt(GRID_MIN + k, GRID_MAX - k);
+    const y0 = randInt(up===1 ? GRID_MIN : GRID_MIN + h, up===1 ? GRID_MAX - h : GRID_MAX);
+    const A = {x:cx-k, y:y0};
+    const B = {x:cx+k, y:y0};
+    const C = {x:cx,   y:y0 + up*h};
+    return [A,B,C];
+  }
+  function randomShape(){
+    const type = choice(['square','rectangle','right','iso']);
+    if(type==='square') return genRectangle(true);
+    if(type==='rectangle') return genRectangle(false);
+    if(type==='right') return genRightTriangle();
+    return genIsoscelesTriangle();
+  }
+
+  // ===== Line selection ensuring final reflection stays within bounds =====
+  function allowedVerticalAs(shape){
+    const {minX, maxX} = bbox(shape);
+    const lo = Math.ceil((GRID_MIN + maxX)/2);
+    const hi = Math.floor((GRID_MAX + minX)/2);
+    const arr = [];
+    for(let a=lo; a<=hi; a++) arr.push(a);
+    return arr;
+  }
+  function allowedHorizontalBs(shape){
+    const {minY, maxY} = bbox(shape);
+    const lo = Math.ceil((GRID_MIN + maxY)/2);
+    const hi = Math.floor((GRID_MAX + minY)/2);
+    const arr = [];
+    for(let b=lo; b<=hi; b++) arr.push(b);
+    return arr;
+  }
+
+  function chooseVerticalLine(shape){
+    const cand = allowedVerticalAs(shape);
+    if(!cand.length) return null;
+    const {minX,maxX} = bbox(shape);
+    const cx = centroid(shape).x;
+
+    const outside = cand.filter(a => a<minX || a>maxX);
+    const edge    = cand.filter(a => a===minX || a===maxX);
+    const inside  = cand.filter(a => a>minX && a<maxX);
+
+    const r = Math.random();
+    let list = null;
+    if(r < 0.70 && outside.length){
+      list = outside.sort((a,b)=> Math.abs(b-cx) - Math.abs(a-cx));
+    }else if(r < 0.92 && inside.length){
+      list = inside.sort((a,b)=> (Math.random()<0.5 ? Math.abs(a-cx)-Math.abs(b-cx) : Math.abs(b-cx)-Math.abs(a-cx)));
+    }else if(edge.length){
+      list = edge;
+    }else{
+      list = cand;
+    }
+    return {type:'vertical', value:list[0]};
+  }
+
+  function chooseHorizontalLine(shape){
+    const cand = allowedHorizontalBs(shape);
+    if(!cand.length) return null;
+    const {minY,maxY} = bbox(shape);
+    const cy = centroid(shape).y;
+
+    const outside = cand.filter(b => b<minY || b>maxY);
+    const edge    = cand.filter(b => b===minY || b===maxY);
+    const inside  = cand.filter(b => b>minY && b<maxY);
+
+    const r = Math.random();
+    let list = null;
+    if(r < 0.70 && outside.length){
+      list = outside.sort((a,b)=> Math.abs(b-cy) - Math.abs(a-cy));
+    }else if(r < 0.92 && inside.length){
+      list = inside.sort((a,b)=> (Math.random()<0.5 ? Math.abs(a-cy)-Math.abs(b-cy) : Math.abs(b-cy)-Math.abs(a-cy)));
+    }else if(edge.length){
+      list = edge;
+    }else{
+      list = cand;
+    }
+    return {type:'horizontal', value:list[0]};
+  }
+
+  // ===== Inputs & checking =====
+  function buildInputs(n){
+    inputsDiv.innerHTML = '';
+    inputsDiv.style.gridTemplateColumns = `repeat(${Math.min(n,4)}, minmax(0, 1fr))`;
+    for(let i=0;i<n;i++){
+      const row = document.createElement('div'); row.className = 'row';
+      const lab = document.createElement('label'); lab.textContent = (i+1)+'.';
+      const box = document.createElement('input');
+      box.type='text'; box.inputMode='decimal'; box.placeholder='(x, y)';
+      box.autocomplete='off'; box.spellcheck=false;
+      box.addEventListener('input', draw);
+      row.append(lab, box); inputsDiv.appendChild(row);
+    }
+  }
+  function parseCoord(str){
+    if(!str) return null;
+    let s = String(str).trim();
+    s = s.replace(/[\(\)\[\]\{\}]/g,'');
+    const parts = s.split(',');
+    if(parts.length!==2) return null;
+    const x=Number(parts[0].trim()), y=Number(parts[1].trim());
+    if(!Number.isFinite(x)||!Number.isFinite(y)) return null;
+    return {x,y};
+  }
+  function peekInputs(){
+    const boxes = [...inputsDiv.querySelectorAll('input')];
+    const out=[];
+    for(const b of boxes){ const p=parseCoord(b.value); if(p) out.push(p); }
+    return out;
+  }
+  function readInputsAllOrNull(expectedCount){
+    const boxes = [...inputsDiv.querySelectorAll('input')];
+    if(boxes.length!==expectedCount) return null;
+    const pts=[];
+    for(const b of boxes){ const p=parseCoord(b.value); if(!p) return null; pts.push(p); }
+    const key = p=>`${Math.round(p.x*1000)},${Math.round(p.y*1000)}`;
+    const uniq = new Set(pts.map(key));
+    if(uniq.size!==pts.length) return null;
+    return pts;
+  }
+  function expectedPts(){ return reflectPolygon(state.original, state.requiredLine); }
+  function ptsEqual(a,b,eps=1e-2){ return Math.abs(a.x-b.x)<=eps && Math.abs(a.y-b.y)<=eps; }
+
+  // ===== Game flow =====
+  function initLineSeq(){
+    state.lineSeq = shuffle(['horizontal','vertical','horizontal','vertical','horizontal','vertical']);
+    state.lineIdx = 0;
+  }
+  function nextLineType(){
+    if(state.lineIdx>=state.lineSeq.length) initLineSeq();
+    return state.lineSeq[state.lineIdx++];
+  }
+
+  function newQuestion(){
+    feedback.style.display='none'; feedback.textContent='';
+    nextBtn.style.display='none';
+    state.answeredCorrectly=false;
+    checkBtn.disabled = false; // re-enable for new question
+
+    // fresh tools
+    resetTools();
+    clearPen();
+
+    // choose shape
+    let tries=0, shape=randomShape(), line=null, type=null;
+    while(tries<40){
+      type = nextLineType();
+      line = (type==='horizontal' ? chooseHorizontalLine(shape) : chooseVerticalLine(shape));
+      if(line){ break; }
+      shape = randomShape(); tries++;
+    }
+    state.original = shape;
+    state.requiredLine = line || {type:'vertical', value:0}; // fallback
+
+    // Build inputs
+    buildInputs(state.original.length);
+
+    // Update prompt text (no grid line is drawn — student must place dashed one)
+    if(state.requiredLine.type==='horizontal'){
+      lineText.textContent = `the line y = ${state.requiredLine.value}`;
+    }else{
+      lineText.textContent = `the line x = ${state.requiredLine.value}`;
+    }
+
+    draw();
+  }
+
+  function enableInputs(on){
+    const boxes=[...inputsDiv.querySelectorAll('input')];
+    boxes.forEach(b=>b.disabled=!on);
+  }
+
+  function checkAnswer(){
+    if(state.answeredCorrectly) return; // block repeated checks after correct
+    const exp = expectedPts();
+    const typed = readInputsAllOrNull(exp.length);
+    if(!typed){
+      feedback.className='msg';
+      feedback.textContent = `Enter ${exp.length} distinct coordinates like "(3, -2)".`;
+      feedback.style.display='inline-block';
+      flashError();
+      return;
+    }
+    // order-insensitive compare
+    const used = new Array(exp.length).fill(false);
+    let ok = true;
+    outer: for(const p of typed){
+      for(let i=0;i<exp.length;i++){
+        if(used[i]) continue;
+        if(ptsEqual(p, exp[i])){ used[i]=true; continue outer; }
+      }
+      ok=false; break;
+    }
+    if(ok){
+      feedback.style.display='none';
+      state.answeredCorrectly = true;
+      enableInputs(false);
+      nextBtn.style.display='inline-block';
+      checkBtn.disabled = true; // prevent score farming
+      state.score += 1; updateHUD();
+      bigMessage('CORRECT!');
+      confetti();
+
+      if(state.mode==='target' && state.score>=state.targetScore){
+        setTimeout(()=>endGame(`You reached ${state.targetScore} points — well done!`), 1000);
+      }
+      draw();
+    }else{
+      feedback.className='msg';
+      feedback.textContent='Not quite. Check each coordinate and try again.';
+      feedback.style.display='inline-block';
+      flashError();
+    }
+  }
+
+  function updateHUD(){
+    hudScore.textContent = `Score: ${state.score}`;
+    if(state.mode==='target'){
+      hudGoal.style.display=''; hudGoal.textContent=`Goal: ${state.targetScore}`;
+      hudTime.style.display='none';
+    }else{
+      hudGoal.style.display='none';
+      hudTime.style.display='';
+      hudTime.textContent = state.timeLimitSec===0 ? 'Time: —' : `Time: ${mmss(state.timeLeftSec)}`;
+    }
+  }
+
+  function mmss(sec){ if(sec<=0) return '00:00'; const m=Math.floor(sec/60), s=sec%60; return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0'); }
+  function stopTimer(){ if(state.timerId){ clearInterval(state.timerId); state.timerId=null; } }
+  function startTimer(){
+    stopTimer();
+    if(state.mode!=='timed' || state.timeLimitSec===0) return;
+    state.timeLeftSec = state.timeLimitSec;
+    state.timerId = setInterval(()=>{
+      state.timeLeftSec--; updateHUD();
+      if(state.timeLeftSec<=0){
+        stopTimer(); bigMessage("TIME'S UP!"); setTimeout(()=>endGame("Time's up!"), 1000);
+      }
+    },1000);
+  }
+
+  function endGame(message){
+    checkBtn.disabled=true; nextBtn.disabled=true; skipBtn.disabled=true; menu.style.display='flex';
+    const panel = menu.querySelector('.panel');
+    panel.innerHTML='';
+    const h = document.createElement('h1'); h.textContent='Game over'; panel.appendChild(h);
+    const summary = document.createElement('div'); summary.className='card';
+    summary.innerHTML = `<div style="font-weight:700; font-size:18px;">${message}</div><div>Final score: <b>${state.score}</b></div>`;
+    panel.appendChild(summary);
+    const footer = document.createElement('div'); footer.className='footer';
+    const again = document.createElement('button'); again.textContent='Play again';
+    again.addEventListener('click', ()=>location.reload());
+    footer.appendChild(again); panel.appendChild(footer);
+  }
+
+  // ===== Effects =====
+  function bigMessage(text){
+    bigMsg.textContent = text; bigMsg.style.display='flex';
+    setTimeout(()=> bigMsg.style.display='none', 1200);
+  }
+  function flashError(){
+    answerBar.classList.add('error'); document.getElementById('app').classList.add('shake');
+    setTimeout(()=>answerBar.classList.remove('error'), 700);
+    setTimeout(()=>document.getElementById('app').classList.remove('shake'), 500);
+  }
+  function confetti(durationMs=1200, count=160){
+    const ctx = confettiCanvas.getContext('2d');
+    const W = confettiCanvas.width/(window.devicePixelRatio||1), H = confettiCanvas.height/(window.devicePixelRatio||1);
+    const parts=[]; for(let i=0;i<count;i++){ parts.push({
+      x: Math.random()*W, y:-10-Math.random()*H*0.3, r:2+Math.random()*3,
+      vy:80+Math.random()*160, vx:-40+Math.random()*80,
+      rot:Math.random()*Math.PI*2, vr:-6+Math.random()*12,
+      gray: 30+Math.floor(Math.random()*200)
+    }); }
+    let last=performance.now(), elapsed=0;
+    confettiCanvas.style.display='block';
+    function step(t){
+      const dt=Math.min(50, t-last); last=t; elapsed+=dt;
+      ctx.clearRect(0,0,W,H);
+      for(const p of parts){
+        p.y += p.vy*(dt/1000); p.x += p.vx*(dt/1000); p.rot += p.vr*(dt/1000);
+        ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot);
+        ctx.fillStyle=`rgb(${p.gray},${p.gray},${p.gray})`; ctx.fillRect(-p.r,-p.r,2*p.r,2*p.r); ctx.restore();
+      }
+      if(elapsed<durationMs){ requestAnimationFrame(step); }else{ ctx.clearRect(0,0,W,H); confettiCanvas.style.display='none'; }
+    }
+    requestAnimationFrame(step);
+  }
+
+  // ===== Tokens: drag-and-drop from palette =====
+  function makeGhost(node){
+    const g=document.createElement('div'); g.className='tokenGhost';
+    g.innerHTML=node.innerHTML; document.body.appendChild(g); return g;
+  }
+  function tokenDragSetup(token, kind){
+    const drag={active:false, ghost:null};
+    function setGhostPos(e){ const c=e.touches?e.touches[0]:e; drag.ghost.style.left=c.clientX+'px'; drag.ghost.style.top=c.clientY+'px'; }
+    function down(e){ e.preventDefault(); drag.active=true; token.classList.add('dragging'); drag.ghost=makeGhost(token); setGhostPos(e);
+      window.addEventListener('mousemove', move); window.addEventListener('mouseup', up, {once:true});
+      window.addEventListener('touchmove', move, {passive:false}); window.addEventListener('touchend', up, {once:true}); }
+    function move(e){ if(!drag.active) return; e.preventDefault(); setGhostPos(e); }
+    function up(e){
+      const rect = stack.getBoundingClientRect();
+      const c=e.changedTouches?e.changedTouches[0]:e;
+      if(c.clientX>=rect.left && c.clientX<=rect.right && c.clientY>=rect.top && c.clientY<=rect.bottom){
+        const gx = pxToGx(c.clientX - rect.left);
+        const gy = pxToGy(c.clientY - rect.top);
+        if(kind==='h'){ state.toolH.placed=true; state.toolH.y = Math.round(gy); state.toolH.last=true; state.toolV.last=false; }
+        if(kind==='v'){ state.toolV.placed=true; state.toolV.x = Math.round(gx); state.toolV.last=true; state.toolH.last=false; }
+        if(kind==='p'){ state.userPoints.push({x: Math.round(gx*100)/100, y: Math.round(gy*100)/100}); }
+        draw();
+      }
+      drag.active=false; token.classList.remove('dragging'); drag.ghost.remove(); drag.ghost=null;
+      window.removeEventListener('mousemove', move); window.removeEventListener('touchmove', move);
+    }
+    token.addEventListener('mousedown', down);
+    token.addEventListener('touchstart', down, {passive:false});
+  }
+  tokenDragSetup(hToken,'h');
+  tokenDragSetup(vToken,'v');
+  tokenDragSetup(ptToken,'p');
+
+  // ===== Helpers for hit-testing points/lines =====
+  function nearestPointIdx(px, py){
+    let best=-1, bestD=Infinity;
+    const thresh = 12; // px
+    state.userPoints.forEach((p,i)=>{
+      const sx=gxToPx(p.x), sy=gyToPx(p.y);
+      const d=Math.hypot(px-sx, py-sy);
+      if(d<bestD){ bestD=d; best=i; }
+    });
+    return (bestD<=thresh) ? best : -1;
+  }
+  function nearHLine(py){
+    if(!state.toolH.placed) return false;
+    const ypx = gyToPx(state.toolH.y);
+    return Math.abs(py-ypx) <= 10;
+  }
+  function nearVLine(px){
+    if(!state.toolV.placed) return false;
+    const xpx = gxToPx(state.toolV.x);
+    return Math.abs(px-xpx) <= 10;
+  }
+
+  // ===== Canvas interactions: move tool lines/points; double-click to remove lines/points =====
+  function onGridPointerDown(e){
+    if(state.penMode!=='off') return; // ink layer handles pen/eraser
+    const p = localXY(e);
+
+    // point drag?
+    const pidx = nearestPointIdx(p.x, p.y);
+    if(pidx>=0){
+      state.dragging=true; state.dragType='point'; state.dragPointIdx=pidx; gridCanvas.setPointerCapture(e.pointerId); e.preventDefault(); return;
+    }
+
+    // line drags
+    if(nearHLine(p.y)){
+      state.dragging=true; state.dragType='hline'; state.toolH.last=true; state.toolV.last=false; gridCanvas.setPointerCapture(e.pointerId); e.preventDefault(); return;
+    }
+    if(nearVLine(p.x)){
+      state.dragging=true; state.dragType='vline'; state.toolV.last=true; state.toolH.last=false; gridCanvas.setPointerCapture(e.pointerId); e.preventDefault(); return;
+    }
+  }
+  function onGridPointerMove(e){
+    if(state.penMode!=='off') return;
+    if(!state.dragging) return;
+    const p=localXY(e);
+    const gx = pxToGx(p.x), gy = pxToGy(p.y);
+    if(state.dragType==='point' && state.dragPointIdx>=0){
+      state.userPoints[state.dragPointIdx] = { x: Math.round(gx*100)/100, y: Math.round(gy*100)/100 };
+      draw(); return;
+    }
+    if(state.dragType==='hline'){ state.toolH.y = Math.round(gy); draw(); return; }
+    if(state.dragType==='vline'){ state.toolV.x = Math.round(gx); draw(); return; }
+  }
+  function onGridPointerUp(e){
+    if(state.penMode!=='off') return;
+    if(state.dragging) gridCanvas.releasePointerCapture(e.pointerId);
+    state.dragging=false; state.dragType=null; state.dragPointIdx=-1;
+  }
+  function onGridDblClick(e){
+    const p = localXY(e);
+    if(nearHLine(p.y)){ state.toolH={placed:false,y:0,last:false}; draw(); return; }
+    if(nearVLine(p.x)){ state.toolV={placed:false,x:0,last:false}; draw(); return; }
+    const idx = nearestPointIdx(p.x, p.y);
+    if(idx>=0){ state.userPoints.splice(idx,1); draw(); }
+  }
+
+  gridCanvas.addEventListener('pointerdown', onGridPointerDown);
+  gridCanvas.addEventListener('pointermove', onGridPointerMove);
+  gridCanvas.addEventListener('pointerup', onGridPointerUp);
+  gridCanvas.addEventListener('pointercancel', onGridPointerUp);
+  gridCanvas.addEventListener('dblclick', onGridDblClick);
+  gridCanvas.addEventListener('contextmenu', e=>e.preventDefault());
+
+  // ===== INK LAYER: Pen & Eraser (always on top of grid area) =====
+  function setPenMode(mode){
+    // mode: 'off' | 'pen' | 'eraser'
+    state.penMode = mode;
+    penBtn.classList.toggle('on', mode==='pen');
+    eraserBtn.classList.toggle('on', mode==='eraser');
+    penBtn.textContent = 'Pen: ' + (mode==='pen' ? 'On' : 'Off');
+    eraserBtn.textContent = 'Eraser: ' + (mode==='eraser' ? 'On' : 'Off');
+
+    // Only the ink canvas receives input in pen/eraser mode:
+    inkCanvas.style.pointerEvents = (mode==='off') ? 'none' : 'auto';
+    // Ensure cursor feels responsive
+    inkCanvas.style.cursor = (mode==='off') ? 'default' : (mode==='pen' ? 'crosshair' : 'cell');
+  }
+  function clearPen(){
+    const sctx = inkCanvas.getContext('2d');
+    const W=inkCanvas.width/(window.devicePixelRatio||1), H=inkCanvas.height/(window.devicePixelRatio||1);
+    const prev = sctx.globalCompositeOperation;
+    sctx.globalCompositeOperation = 'source-over';
+    sctx.clearRect(0,0,W,H); // clears INK layer only; grid below untouched
+    sctx.globalCompositeOperation = prev;
+  }
+  penBtn.addEventListener('click', ()=> setPenMode(state.penMode==='pen' ? 'off' : 'pen'));
+  eraserBtn.addEventListener('click', ()=> setPenMode(state.penMode==='eraser' ? 'off' : 'eraser'));
+  clearPenBtn.addEventListener('click', clearPen);
+
+  function inkPointerDown(e){
+    if(state.penMode==='off') return;
+    state.penDrawing = true;
+    const p = localXY(e);
+    state.penLast.x = p.x; state.penLast.y = p.y;
+    inkCanvas.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  }
+  function inkPointerMove(e){
+    if(state.penMode==='off' || !state.penDrawing) return;
+    const sctx = inkCanvas.getContext('2d');
+    const p = localXY(e);
+
+    // smooth segment from last to current to avoid gaps
+    sctx.lineCap='round'; sctx.lineJoin='round';
+    if(state.penMode==='pen'){
+      sctx.globalCompositeOperation = 'source-over';  // draw ink ABOVE everything
+
+      // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      // PEN THICKNESS: change the numeric value below to adjust the pen width.
+      // It is currently set to 4 (half of the previous 8).
+      sctx.lineWidth = 4;
+      // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+      sctx.strokeStyle='#000';
+    }else{
+      sctx.globalCompositeOperation = 'destination-out'; // erase INK ONLY
+      sctx.strokeStyle='rgba(0,0,0,1)';
+      sctx.lineWidth = 18; // eraser size (removes pen-only overlay)
+    }
+    sctx.beginPath();
+    sctx.moveTo(state.penLast.x, state.penLast.y);
+    sctx.lineTo(p.x, p.y);
+    sctx.stroke();
+
+    state.penLast.x = p.x; state.penLast.y = p.y;
+    e.preventDefault();
+  }
+  function inkPointerUp(e){
+    if(state.penMode==='off') return;
+    state.penDrawing=false;
+    try{ inkCanvas.releasePointerCapture(e.pointerId); }catch{}
+  }
+
+  inkCanvas.addEventListener('pointerdown', inkPointerDown);
+  inkCanvas.addEventListener('pointermove', inkPointerMove);
+  inkCanvas.addEventListener('pointerup', inkPointerUp);
+  inkCanvas.addEventListener('pointercancel', inkPointerUp);
+  inkCanvas.addEventListener('contextmenu', e=>e.preventDefault());
+
+  // ===== Tools reset =====
+  function resetTools(){
+    state.toolH = {placed:false, y:0, last:false};
+    state.toolV = {placed:false, x:0, last:false};
+    state.userPoints = [];
+    draw();
+  }
+  resetToolsBtn.addEventListener('click', resetTools);
+
+  // ===== Menu / modes =====
+  function applyModeUI(){
+    const mode = modeRadios.find(r=>r.checked)?.value || 'target';
+    if(mode==='timed'){
+      timeChoices.classList.remove('disabled');
+      timeChoices.setAttribute('aria-disabled','false');
+      if(!timeChoices.querySelector('.pillBtn.sel')){
+        timeChoices.querySelector('.pillBtn[data-min="5"]').classList.add('sel');
+      }
+    }else{
+      timeChoices.classList.add('disabled');
+      timeChoices.setAttribute('aria-disabled','true');
+      [...timeChoices.querySelectorAll('.pillBtn')].forEach(b=>b.classList.remove('sel'));
+    }
+  }
+  modeRadios.forEach(r=> r.addEventListener('change', applyModeUI));
+  applyModeUI();
+
+  timeChoices.addEventListener('click', (e)=>{
+    if(timeChoices.classList.contains('disabled')) return;
+    const btn = e.target.closest('.pillBtn'); if(!btn) return;
+    [...timeChoices.children].forEach(b=>b.classList.remove('sel'));
+    btn.classList.add('sel');
+  });
+
+  function mmss(sec){ if(sec<=0) return '00:00'; const m=Math.floor(sec/60), s=sec%60; return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0'); }
+
+  function openMenu(){
+    stopTimer(); menu.style.display='flex';
+  }
+
+  function startGame(){
+    const mode = modeRadios.find(r=>r.checked)?.value || 'target';
+    state.mode = mode;
+    if(mode==='target'){
+      const v = Math.max(5, Math.round(Number(targetScoreInput.value)||10));
+      state.targetScore = v; state.timeLimitSec=0; state.timeLeftSec=0;
+      hudGoal.style.display=''; hudGoal.textContent=`Goal: ${state.targetScore}`;
+      hudTime.style.display='none';
+    }else{
+      const sel = timeChoices.querySelector('.pillBtn.sel') || timeChoices.querySelector('.pillBtn[data-min="5"]');
+      const min = Number(sel?.dataset.min || '5');
+      state.timeLimitSec = Math.max(0, Math.round(min*60));
+      state.timeLeftSec = state.timeLimitSec;
+      hudTime.style.display=''; hudGoal.style.display='none';
+    }
+    state.score=0; updateHUD();
+    initLineSeq();
+    menu.style.display='none';
+    newQuestion();
+    startTimer();
+  }
+
+  startBtn.addEventListener('click', startGame);
+  menuBtn.addEventListener('click', openMenu);
+
+  // ===== Buttons =====
+  checkBtn.addEventListener('click', checkAnswer);
+  skipBtn.addEventListener('click', ()=>{ enableInputs(true); newQuestion(); });
+  nextBtn.addEventListener('click', ()=>{ enableInputs(true); newQuestion(); });
+  document.addEventListener('keydown', (e)=>{
+    if(e.key==='Enter') checkAnswer();
+    if(e.key.toLowerCase()==='m') openMenu();
+    if(e.key.toLowerCase()==='s'){ enableInputs(true); newQuestion(); } // skip
+    if(e.key.toLowerCase()==='k'){ setPenMode(state.penMode==='pen' ? 'off' : 'pen'); } // toggle pen
+    if(e.key.toLowerCase()==='e'){ setPenMode(state.penMode==='eraser' ? 'off' : 'eraser'); } // toggle eraser
+    if(e.key.toLowerCase()==='c'){ clearPen(); }
+  });
+
+  // ===== Init & resize =====
+  function updateHUD(){
+    hudScore.textContent = `Score: ${state.score}`;
+    if(state.mode==='target'){
+      hudGoal.style.display=''; hudGoal.textContent=`Goal: ${state.targetScore}`;
+      hudTime.style.display='none';
+    }else{
+      hudGoal.style.display='none';
+      hudTime.style.display='';
+      hudTime.textContent = state.timeLimitSec===0 ? 'Time: —' : `Time: ${mmss(state.timeLeftSec)}`;
+    }
+  }
+
+  window.addEventListener('resize', resizeCanvasToFit);
+  const ro = new ResizeObserver(resizeCanvasToFit); ro.observe(document.getElementById('app'));
+  // show menu initially
+  menu.style.display='flex';
+  resizeCanvasToFit();
+})();
+</script>
+</body>
+</html>
